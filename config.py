@@ -25,13 +25,14 @@ BACKOFF_JITTER_S = 0.25
 RETRY_AFTER_FALLBACK_S = 2.0
 
 # Rate limiting: keep under ~8 req/s burst and under the 10s / 30-req window.
-GLOBAL_MIN_INTERVAL_S = 0.15              # ~6.7 req/s cap
+GLOBAL_MIN_INTERVAL_S = 0.15              # ~6.7 req/s burst cap
 FAIR_USE_WINDOW_S = 10.0
-FAIR_USE_MAX_REQS = 25                    # margin below 30
+FAIR_USE_MAX_REQS = 15                    
 
 # --- Soft ban ---
 SOFT_BAN_BACKOFF_S = 30.0
 SOFT_BAN_MAX_BACKOFF_S = 90.0
+SOFT_BAN_COOLDOWN_S = 15.0                # sleep between sweeps after a ban
 
 # --- Completeness reasons ---
 # NOTE: pre-launch empty is NOT here. A store that legitimately carries zero

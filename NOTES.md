@@ -7,6 +7,18 @@
 - IST bucketing: <draft — sweep → IST day via UTC+5:30>
 - Idempotency: <draft — unique (as_of, store_id, sku_id), INSERT OR IGNORE>
 
+### Store tracking
+Track a store in a sweep if `is_active == true` in that sweep's store list.
+`is_active=false` means the store is decommissioned — it should not count
+toward availability. `is_serviceable` reflects real-time order acceptance and
+flips intra-day (rain, maintenance, staffing); excluding non-serviceable
+stores would bias OSA upward because a store can be non-serviceable *because*
+it's out of stock. We record both flags per sweep but only `is_active` gates
+tracking.
+
+Consequence: a store can be tracked in one sweep and not in another. That's
+intentional — availability is a per-sweep observation.
+
 ## Problems from Step 2 and how I handle them
 <leave placeholder, fill in Chunk 2/3>
 
@@ -122,3 +134,42 @@ with cf.ThreadPoolExecutor(max_workers=20) as ex:
 429 burst limit (8 req/s): reproduced by 20 parallel unthrottled requests to /v1/stores — first ~6 succeeded, the rest returned 429 with Retry-After: 2. Our client's _rate_limit() prevents this in normal operation; when a 429 does occur, _get_with_retries honors Retry-After rather than using its own backoff.
 
 
+
+
+
+total 4 stores are is_active: false but servicable!
+total 3 stores are is_servicable: false
+
+### Decommissioned-but-serviceable stores (MUM-009, BLR-004)
+`is_active=false` means the store is decommissioned from QuickMart's roster.
+`is_serviceable=true` means the store is still accepting orders right now.
+
+These two flags contradict in principle. My rule: if the partner API says a
+store is serviceable, a customer can order from it, and it belongs in OSA.
+OSA is a customer-facing metric, not a policy metric. I do not override the
+API's own claim because doing so would be a silent data-quality decision
+dressed up as filtering.
+
+Decision: include the store. (Optional: surface the anomalous flag
+combination in coverage.anomalies[] so the partner team can investigate.)
+
+The moment a scraper starts editing what it collects, the metric stops being
+"what the partner said" and becomes "what I decided to believe."
+
+
+### Soft ban — observed and handled
+Ran all 6 sweeps back-to-back on 3 occasions. First run: 2 bans.
+After lowering FAIR_USE_MAX_REQS (25 → 20) and adding a 15s inter-sweep
+cooldown: 1 ban. After lowering to 15: 0 bans.
+
+The remaining ban in the middle run was caused by MUM-007, which the mock
+serves as two deterministic 500s before returning real data — 3 requests
+against the inventory window for one store. Combined with normal retry
+traffic, that pushed a sweep over the mock's 30-per-10s threshold.
+
+Detection signal: HTTP 200 with meta.source == "edge" and truncated or
+empty items. Response: mark the store incomplete (reason=soft_ban),
+discard its items (never save a partial slice), back off, continue.
+
+Items from banned responses are never written to inventory — the sweep is
+honest about what it could and couldn't read.

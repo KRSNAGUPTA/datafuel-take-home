@@ -99,3 +99,26 @@ Price: Normally int but can be string -> BLR
 Pre Launch Empty: BLR-007 before 2026-09-27T12:00:00Z returns []
 
 
+
+## Problems from Step 2
+
+```
+python3 -c "
+import concurrent.futures as cf, requests
+H = {'X-Api-Key': 'dfhire-2026'}
+def hit(i):
+    try:
+        r = requests.get('http://127.0.0.1:8765/v1/stores',
+                         params={'page': 1}, headers=H, timeout=10)
+        return i, r.status_code, r.headers.get('Retry-After')
+    except Exception as e:
+        return i, type(e).__name__, None
+with cf.ThreadPoolExecutor(max_workers=20) as ex:
+    for row in ex.map(hit, range(20)):
+        print(row)
+"
+
+```
+429 burst limit (8 req/s): reproduced by 20 parallel unthrottled requests to /v1/stores — first ~6 succeeded, the rest returned 429 with Retry-After: 2. Our client's _rate_limit() prevents this in normal operation; when a 429 does occur, _get_with_retries honors Retry-After rather than using its own backoff.
+
+

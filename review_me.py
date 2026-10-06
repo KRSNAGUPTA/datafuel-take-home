@@ -19,6 +19,9 @@ HEADERS = {"X-Api-Key": "dfhire-2026"}
 
 def fetch_inventory(store_id, as_of, cursor="0", results=[]):
     """Fetch every inventory page for a store, retrying until it works."""
+
+
+    # Keeping retry even if we got 404 -> Not found will keep consuming the resources
     while True:
         try:
             r = requests.get(

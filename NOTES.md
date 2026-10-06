@@ -173,3 +173,12 @@ discard its items (never save a partial slice), back off, continue.
 
 Items from banned responses are never written to inventory — the sweep is
 honest about what it could and couldn't read.
+
+grep FAIR_USE_MAX_REQS config.py
+python3 sweep.py --as-of 2026-09-27T19:00:00Z
+
+
+45 -> 2 DEl-007 & BLR-001 total time: 78s
+44 -> 1 DEL-008 total time: 59s
+43 -> No softban total time: 27s
+40 -> No softban total time: 52s

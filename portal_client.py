@@ -54,7 +54,7 @@ class InventoryResult:
 # ---------------------------------------------------------------------------
 
 _session = requests.Session()
-_session.headers.update({"X-Api-Key": API_KEY})
+_session.headers.update({"X-Api-Key": API_KEY}) # All endpoints except health reuire this header
 
 
 def _get(path: str, params: dict | None = None) -> requests.Response:
@@ -62,7 +62,7 @@ def _get(path: str, params: dict | None = None) -> requests.Response:
 
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-TERMINAL_STATUS  = {400, 401, 404}
+TERMINAL_STATUS  = {400, 401, 404} # No retry if these status appear in res.status_code
 
 
 def _classify(resp: requests.Response) -> str:
@@ -81,7 +81,7 @@ def _classify(resp: requests.Response) -> str:
 
 _rl_lock = threading.Lock()
 _last_request_at = [0.0]
-_window: deque[float] = deque()
+_window: deque[float] = deque() # ts as weight for this priority queue window
 
 
 def _rate_limit() -> None:

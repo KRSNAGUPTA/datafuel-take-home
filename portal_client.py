@@ -187,7 +187,7 @@ def _is_soft_banned(body: dict, page_items: list) -> bool:
         return False
     if not page_items:
         return True
-    if body.get("next_cursor") and len(page_items) < 15: #hardcoded because api.md state 15 items will return on each page
+    if body.get("next_cursor") and len(page_items) < 15: # The mock's INV_PAGE is 15. Real APIs vary page size; noted as a limitation in NOTES.md.
         return True
     return False
 

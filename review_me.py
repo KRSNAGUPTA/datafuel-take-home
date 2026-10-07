@@ -1,11 +1,17 @@
 """
-review_me.py: written by an AI coding assistant in one shot and merged without review.
+Fixed:
+  1. Mutable default `results=[]` — cross-store contamination. Now local.
+  2. Infinite retry loop — now bounded (4 attempts), status-aware
+     (4xx terminal, 429/5xx retryable), honors Retry-After, 8s timeout.
+     Pagination flattened from recursion to iteration.
 
-Your job (write it in REVIEW.md):
-  1. Find at least 5 real problems, most serious first. For each, say what goes wrong,
-     with a concrete example (not just "bad practice").
-  2. Fix the 2-3 most serious ones in this file.
-Don't rewrite it from scratch. Reviewing is the skill being tested.
+Not fixed (documented in REVIEW.md):
+  - save(): f-string SQL interpolation (breaks on quotes; injection).
+  - city_osa(): uses qty > 0 instead of in_stock.
+  - city_osa(): averages per-store percentages instead of aggregating.
+  - city_osa(): substr(observed_at,1,10) mixes UTC and IST formats.
+  - __main__: stores table never populated; datetime.utcnow() is naive.
+
 """
 import sqlite3
 import time
@@ -16,31 +22,51 @@ import requests
 PORTAL = "http://127.0.0.1:8765"
 HEADERS = {"X-Api-Key": "dfhire-2026"}
 
+def fetch_inventory(store_id, as_of, cursor="0"):
+    """Fetch every page for a store, retrying transient failures with backoff."""
+    results = [] # So stays within the function / not shared ( previously it was passed as param)
+    max_retries = 4
 
-def fetch_inventory(store_id, as_of, cursor="0", results=[]):
-    """Fetch every inventory page for a store, retrying until it works."""
+    while True:                                       # outer loop: pages
+        curr_attempt = 0                              # reset retry budget per page
 
+        while True:                                   # inner loop: retries for this page
+            try:
+                r = requests.get(
+                    f"{PORTAL}/v1/stores/{store_id}/inventory",
+                    params={"as_of": as_of, "cursor": cursor},
+                    headers=HEADERS,
+                    timeout=8.0, # add timeout
+                )
+            except (requests.Timeout, requests.ConnectionError):
+                curr_attempt += 1
+                if curr_attempt >= max_retries:
+                    raise
+                time.sleep(0.5 * (2 ** curr_attempt))
+                continue
 
-    while True:
-        try:
-            r = requests.get(
-                f"{PORTAL}/v1/stores/{store_id}/inventory",
-                params={"as_of": as_of, "cursor": cursor},
-                headers=HEADERS,
-            )
-            status = r.status_code
-            
+            if r.status_code in (400, 401, 404):
+                r.raise_for_status()
+
+            if r.status_code in (429, 500, 502, 503, 504):
+                curr_attempt += 1
+                if curr_attempt >= max_retries:
+                    r.raise_for_status()
+                retry_after = r.headers.get("Retry-After")
+                time.sleep(float(retry_after) if retry_after else 0.5 * (2 ** curr_attempt))
+                continue
+
             r.raise_for_status()
-            break
-        except Exception:
-            time.sleep(0.1)
-            continue
-    body = r.json()
-    results.extend(body["items"])
-    if body["next_cursor"]:
-        return fetch_inventory(store_id, as_of, body["next_cursor"], results)
-    return results
+            break                                     # this page succeeded
 
+        body = r.json()
+        results.extend(body["items"])
+
+        if not body["next_cursor"]:
+            return results
+
+        cursor = body["next_cursor"]
+        # outer loop continues with the new cursor
 
 def save(conn, store_id, items):
     for it in items:

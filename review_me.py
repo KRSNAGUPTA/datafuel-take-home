@@ -21,7 +21,6 @@ def fetch_inventory(store_id, as_of, cursor="0", results=[]):
     """Fetch every inventory page for a store, retrying until it works."""
 
 
-    # Keeping retry even if we got 404 -> Not found will keep consuming the resources
     while True:
         try:
             r = requests.get(
@@ -29,6 +28,8 @@ def fetch_inventory(store_id, as_of, cursor="0", results=[]):
                 params={"as_of": as_of, "cursor": cursor},
                 headers=HEADERS,
             )
+            status = r.status_code
+            
             r.raise_for_status()
             break
         except Exception:

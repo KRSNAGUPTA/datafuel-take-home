@@ -19,3 +19,10 @@ Prompt: "schema with unique (as_of,store_id,sku_id) + config for retry/backoff/r
 Outcome: kept as-is; removed REASON_PRE_LAUNCH after noticing BLR-007 pre-launch empty is a complete observation (mock behavior, not a failure)
 
 AI wrong here: AI didn't flagged about upstream error when asked initially but I discovered while testing rate-limit
+
+
+
+
+### AI Wrong
+AI failed to predict the real world infinite pagination bug in which server keep returning n+1 page as count with same item,
+I've added a max page limit to 15: each store has max 3 pages * 5 gives safe space

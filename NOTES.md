@@ -182,3 +182,62 @@ python3 sweep.py --as-of 2026-09-27T19:00:00Z
 44 -> 1 DEL-008 total time: 59s
 43 -> No softban total time: 27s
 40 -> No softban total time: 52s
+
+
+# Soft-Ban Detection — Design, Logic, and Limitations
+
+## The detector
+
+`_is_soft_banned(body, page_items)` returns `True` only when the response exhibits the mock's soft-ban signature.
+
+| `meta.source` | items empty | `next_cursor` set | items < 15 | Verdict |
+|---|---|---|---|---|
+| `origin` | any | any | any | Not banned |
+| `edge` | yes | any | any | **Banned** |
+| `edge` | no | no | any | Not banned |
+| `edge` | no | yes | yes | **Banned** |
+| `edge` | no | yes | no | Not banned |
+
+Two ban signals:
+- Empty items from an `edge` source.
+- Truncated first page (`next_cursor` set but page is short).
+
+## Code path each row corresponds to
+
+| Row | Which `if` fires |
+|---|---|
+| 1 | `if src != "edge": return False` |
+| 2 | `if not page_items: return True` |
+| 3 | falls through the truncation check |
+| 4 | `if body.get("next_cursor") and len(page_items) < 15` succeeds |
+| 5 | final `return False` |
+
+## Hardcoded page size — a real limitation
+
+The detector hardcodes `15`, matching the mock's `INV_PAGE = 15`.
+
+| Real server page size | Behavior with hardcoded 15 |
+|---|---|
+| 20 | Truncated page of 15 items not flagged (< 15 is False). Miss. |
+| 10 | Every healthy full page (10 items) looks truncated. False positives. |
+
+Real APIs vary page size by endpoint, tier, load, or API version. A CDN edge layer might differ from origin.
+
+
+### Pagination safety cap
+fetch_stores and fetch_inventory cap iterations at MAX_*_PAGES (both 15).
+Against a well-behaved server this never fires: the mock returns 3 pages
+for the store roster and ~3 per store for inventory. The cap exists to
+fail fast if a server ever returns a never-ending next_page/next_cursor
+chain — a known failure mode in real integrations.
+
+Set to 15 = 5× the expected maximum of 3. 5× is a heuristic: enough margin
+that legitimate growth doesn't trip it, small enough that a bug fails
+within ~2 seconds (15 pages × 0.15s rate limit) rather than looping
+forever. A production client would derive the cap from the API's
+documented maximum page count, or set it from observed metrics.
+
+Failure mode is deliberately asymmetric:
+- fetch_stores raises PortalError (roster failure is fatal — nothing to sweep).
+- fetch_inventory returns complete=False with reason=retries_exhausted
+  (per-store failures are isolated; the sweep continues with other stores).

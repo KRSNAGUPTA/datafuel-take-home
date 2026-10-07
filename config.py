@@ -1,10 +1,15 @@
 """Constants shared across sweep.py, app.py and tests."""
 import os
 from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
+load_dotenv()
 
 # --- Portal ---
 PORTAL_BASE = f"http://127.0.0.1:{os.environ.get('PORT', '8765')}"
-API_KEY = "dfhire-2026" # Header key required for authorization
+API_KEY = os.environ.get('API_KEY') # Header key required for authorization
+
+if not API_KEY:
+    raise RuntimeError("API Key is not set in .env")
 
 # --- Time ---
 IST = ZoneInfo("Asia/Kolkata")            # UTC+5:30
@@ -35,6 +40,17 @@ FAIR_USE_MAX_REQS = 15      #  25 -> 20 -> 15 (curr) | server limit is 30 : 15+r
 # --- Soft ban ---
 SOFT_BAN_BACKOFF_S = 30.0 # server ban for 20s + 5sec if retry when banned -> 30 gives 10 sec margin
 SOFT_BAN_COOLDOWN_S = 15.0                # sleep between sweeps after a ban, server SOFT_WINDOW = 10 sec
+
+
+# --- Pagination safety ---
+# The mock returns ≤3 pages for /v1/stores (30 stores / 12 per page) and
+# ≤3 per store for /inventory (~30 items / 15 per page). Caps are ~5× the
+# expected maximum: enough for real growth, small enough that a misbehaving
+# server fails fast instead of looping forever. A production client would
+# derive these from documented API limits.
+MAX_STORE_PAGES = 15 
+MAX_INVENTORY_PAGES = 15
+
 
 # --- Completeness reasons ---
 # NOTE: pre-launch empty is NOT here. A store that legitimately carries zero

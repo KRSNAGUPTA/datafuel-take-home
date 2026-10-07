@@ -22,7 +22,7 @@ from config import (
     MAX_RETRIES, BACKOFF_BASE_S, BACKOFF_JITTER_S, RETRY_AFTER_FALLBACK_S,
     GLOBAL_MIN_INTERVAL_S, FAIR_USE_WINDOW_S, FAIR_USE_MAX_REQS,
     SOFT_BAN_BACKOFF_S,
-    REASON_PARTIAL, REASON_SOFT_BAN, REASON_RETRIES,
+    REASON_PARTIAL, REASON_SOFT_BAN, REASON_RETRIES, MAX_INVENTORY_PAGES, MAX_STORE_PAGES
 )
 
 log = logging.getLogger(__name__)
@@ -151,13 +151,24 @@ def _get_with_retries(path: str, params: dict | None = None) -> requests.Respons
 # ---------------------------------------------------------------------------
 
 def fetch_stores() -> list[dict]:
-    """All stores across every page, as returned by /v1/stores."""
+    """All stores across every page, as returned by /v1/stores.
+    
+     Raises PortalError if the server returns more than MAX_STORE_PAGES pages a defensive cap against a misbehaving server that never sets next_page to null.
+    """
     stores: list[dict] = []
-    page = 1
+    page = 1 # As per API.md -> Page Start at 1
+    pages_fetched = 0 # As per API.md we have 3 pages with 12 with total 30 Stores, but 15 is for safety if server keep returning next with stale data
+   
     while True:
+        if pages_fetched >= MAX_STORE_PAGES:
+            raise PortalError(
+                f"store pagination exceeded {MAX_STORE_PAGES} pages; "
+                "server may be misbehaving"
+            )
         resp = _get_with_retries("/v1/stores", {"page": page})
         body = resp.json()
         stores.extend(body["stores"])
+        pages_fetched+=1
         nxt = body.get("next_page")
         if not nxt:
             return stores
@@ -176,7 +187,7 @@ def _is_soft_banned(body: dict, page_items: list) -> bool:
         return False
     if not page_items:
         return True
-    if body.get("next_cursor") and len(page_items) < 15:
+    if body.get("next_cursor") and len(page_items) < 15: #hardcoded because api.md state 15 items will return on each page
         return True
     return False
 
@@ -193,7 +204,12 @@ def fetch_inventory(store_id: str, as_of: str) -> InventoryResult:
     seen_sku_ids: set[str] = set()
     cursor = "0"
 
+    pages_fetched = 0
+
     while True:
+        if(pages_fetched >= MAX_INVENTORY_PAGES):
+            log.warning("inventory %s %s: page cap exceeded", store_id, as_of)
+            return InventoryResult(items=items, complete=False, reason=REASON_RETRIES)
         try:
             resp = _get_with_retries(
                 f"/v1/stores/{store_id}/inventory",
@@ -226,6 +242,7 @@ def fetch_inventory(store_id: str, as_of: str) -> InventoryResult:
             items.append(it)
 
         nxt = body.get("next_cursor")
+        pages_fetched+=1
         if not nxt:
             # Complete: no partial flag, no ban, we drained every page.
             # NOTE: an empty list here is a *complete* observation of a store
